@@ -1,0 +1,509 @@
+# deneme ADD3-L
+# Simülasyonun toplam süresi ve zaman çözünürlüğü
+T_total <- 1000   # simülasyonun ne kadar uzun süreceğini belirler
+dt <- 1           # her adımda zamanın ne kadar ilerlediğini belirler
+time <- seq(0, T_total, by = dt)  # simülasyonda ilerlenen zaman noktaları
+
+#binary
+# Calcium context (ortam kalsiyum durumu)
+# C = 0 : calcium-poor ortam → ADD3-L genelde stabil (actin-bound)
+# C = 1 : calcium-rich ortam → Ca2+-CaM aktivasyonu olası, metastatik davranış artar
+C <- 1
+
+# Poisson süreci için Ca2+-CaM'nin ADD3-L ile karşılaşma hızı
+lambda_0 <- 0.01     # calciumdan bağımsız, bazal karşılaşma hızı
+lambda_1 <- 0.05     # kalsiyumun karşılaşma hızını artıran etkisi
+lambda <- lambda_0 + lambda_1 * C  # toplam CaM–ADD3 temas hızı
+
+# Gamma dağılımı: ADD3-L'nin aktif hale geçmesi için gereken süre
+k <- 3                 # aktivasyon için gereken etkin CaM teması sayısı
+theta_base <- 20       # calcium-poor ortamda aktivasyonun karakteristik süresi
+theta <- theta_base / (1 + C)  # calcium arttıkça aktivasyon süresi kısalır
+
+# ADD3-L'nin Ca2+-CaM ile aktive olmasına kadar geçen süre
+T_act <- rgamma(1, shape = k, scale = theta)
+
+T_act
+replicate(10, rgamma(1, k, theta))
+
+# Durum vektörü: A = 0 (stable), B = 1 (active/metastatic)
+state <- rep(0, length(time))
+
+# A -> B geçişi
+state[time >= T_act] <- 1
+# ADD3-L'nin aktif durumda geçirdiği zaman oranı
+activation_score <- mean(state)
+
+activation_score
+plot(time, state, type = "s",
+     ylab = "ADD3 state (0=stable, 1=active)",
+     xlab = "Time")
+
+# Simülasyon sayısı
+n_sim <- 100
+
+activation_scores <- numeric(n_sim)
+
+for (i in 1:n_sim) {
+  # Her simülasyon için yeni aktivasyon süresi
+  T_act <- rgamma(1, shape = k, scale = theta)
+  
+  # Durum vektörü
+  state <- rep(0, length(time))
+  state[time >= T_act] <- 1
+  
+  # Aktif kalınan zaman oranı
+  activation_scores[i] <- mean(state)
+}
+
+activation_scores
+hist(activation_scores,
+     breaks = 20,
+     main = "Distribution of ADD3-L activation score",
+     xlab = "Fraction of time in active (metastatic) state")
+mean(activation_scores)
+sd(activation_scores)
+
+
+### ortak simulasyon
+simulate_activation <- function(C, n_sim = 100) {
+  lambda <- lambda_0 + lambda_1 * C
+  theta <- theta_base / (1 + C)
+  
+  scores <- numeric(n_sim)
+  
+  for (i in 1:n_sim) {
+    T_act <- rgamma(1, shape = k, scale = theta)
+    state <- rep(0, length(time))
+    state[time >= T_act] <- 1
+    scores[i] <- mean(state)
+  }
+  
+  return(scores)
+}
+
+# İki koşul
+scores_lowCa  <- simulate_activation(C = 0, n_sim = 100)
+scores_highCa <- simulate_activation(C = 1, n_sim = 100)
+
+hist(scores_lowCa,
+     breaks = 20,
+     col = rgb(0, 0, 1, 0.5),
+     xlim = c(0, 1),
+     main = "ADD3-L activation under different calcium contexts",
+     xlab = "Fraction of time in active (metastatic) state")
+
+hist(scores_highCa,
+     breaks = 20,
+     col = rgb(1, 0, 0, 0.5),
+     add = TRUE)
+
+legend("bottomright",
+       legend = c("Calcium-poor", "Calcium-rich"),
+       fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)))
+
+
+par(mar = c(5, 5, 4, 2))  # kenar boşlukları (soldaki y-label için)
+
+hist(scores_lowCa,
+     breaks = 20,
+     col = rgb(0.2, 0.4, 1, 0.5),
+     xlim = c(0.85, 1),
+     ylim = c(0, max(hist(scores_lowCa, plot = FALSE)$counts,
+                     hist(scores_highCa, plot = FALSE)$counts)),
+     main = "ADD3-L activation under different calcium contexts",
+     xlab = "Fraction of time in active (metastatic) state",
+     ylab = "Frequency",
+     cex.main = 1.4,
+     cex.lab = 1.2)
+
+hist(scores_highCa,
+     breaks = 20,
+     col = rgb(1, 0.3, 0.3, 0.5),
+     add = TRUE)
+
+legend("topleft",
+       legend = c("Calcium-poor", "Calcium-rich"),
+       fill = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)),
+       border = NA,
+       cex = 1)
+##
+###simdi yukaridaki kodu artik calcium sanki binary degil de continous gibi yapip
+#treshold bakiyorum
+# --- 1) Ayarlar ---
+T_total <- 1000
+dt <- 1
+time <- seq(0, T_total, by = dt)
+
+# Model parametreleri (seninkiler)
+lambda_0 <- 0.01
+lambda_1 <- 0.05
+k <- 3
+theta_base <- 20
+
+# --- 2) Tek bir C için simülasyon fonksiyonu ---
+simulate_activation_cont <- function(C, n_sim = 100) {
+  lambda <- lambda_0 + lambda_1 * C
+  theta  <- theta_base / (1 + C)
+  
+  scores <- numeric(n_sim)
+  for (i in 1:n_sim) {
+    T_act <- rgamma(1, shape = k, scale = theta)  # aktivasyon zamanı
+    state <- rep(0, length(time))
+    state[time >= T_act] <- 1
+    scores[i] <- mean(state)
+  }
+  scores
+}
+
+# --- 3) Continuous C taraması ---
+C_grid <- seq(0, 1, by = 0.05)
+res_list <- lapply(C_grid, simulate_activation_cont, n_sim = 100)
+
+mean_score <- sapply(res_list, mean)
+low_ci     <- sapply(res_list, function(x) quantile(x, 0.05))
+high_ci    <- sapply(res_list, function(x) quantile(x, 0.95))
+
+# --- 4) Çizim: doz-yanıt eğrisi + belirsizlik bandı ---
+plot(C_grid, mean_score, type = "b",
+     xlab = "Calcium context (C, continuous)",
+     ylab = "ADD3-L activation score (fraction of time active)",
+     main = "Continuous calcium effect on ADD3-L activation",
+     ylim = c(min(low_ci), max(high_ci)))
+
+lines(C_grid, low_ci, lty = 2)
+lines(C_grid, high_ci, lty = 2)
+legend("bottomright",
+       legend = c("Mean", "5–95% range"),
+       lty = c(1, 2), bty = "n")
+
+###simdi B'den A'ya geri donus yapiyoruz, stabilizasyon nasil olur 
+# B -> A (deaktivasyon / geri stabilizasyon) hızı:
+# calcium arttıkça geri dönüş zorlaşsın diye azalttık
+kBA_0 <- 0.02   # bazal geri dönüş hızı
+kBA_1 <- 0.015  # kalsiyumun geri dönüşü azaltan etkisi
+kBA <- max(1e-6, kBA_0 - kBA_1 * C)  # negatif olmasın diye sınır koyduk
+
+# A -> B (aktivasyon) hızı: beklenen aktivasyon süresinin tersi
+kAB <- 1 / (k * theta)
+state <- rep(0, length(time))  # 0=A (stable), 1=B (active)
+state[1] <- 0                  # başlangıç A
+
+for (t in 2:length(time)) {
+  if (state[t-1] == 0) {
+    # A'daysak: B'ye geçiş olasılığı ~ kAB * dt
+    p <- min(1, kAB * dt)
+    state[t] <- rbinom(1, 1, p)
+  } else {
+    # B'deysek: A'ya dönüş olasılığı ~ kBA * dt
+    p <- min(1, kBA * dt)
+    back_to_A <- rbinom(1, 1, p)
+    state[t] <- ifelse(back_to_A == 1, 0, 1)
+  }
+}
+
+activation_score <- mean(state)
+activation_score
+plot(time, state, type = "s",
+     ylab = "ADD3 state (0=stable, 1=active)",
+     xlab = "Time",
+     main = "A <-> B switching with B->A back-transition")
+simulate_switching_score <- function(C, n_sim = 100) {
+  # Parametreler
+  theta <- theta_base / (1 + C)
+  kAB <- 1 / (k * theta)               # A -> B
+  
+  kBA <- max(1e-6, kBA_0 - kBA_1 * C)  # B -> A (calcium arttıkça azalır)
+  
+  scores <- numeric(n_sim)
+  
+  for (i in 1:n_sim) {
+    state <- rep(0, length(time))
+    state[1] <- 0
+    
+    for (t in 2:length(time)) {
+      if (state[t-1] == 0) {
+        p <- min(1, kAB * dt)
+        state[t] <- rbinom(1, 1, p)
+      } else {
+        p <- min(1, kBA * dt)
+        back_to_A <- rbinom(1, 1, p)
+        state[t] <- ifelse(back_to_A == 1, 0, 1)
+      }
+    }
+    scores[i] <- mean(state)
+  }
+  scores
+}
+
+# İki koşul için dağılımlar
+scores_lowCa  <- simulate_switching_score(C = 0, n_sim = 100)
+scores_highCa <- simulate_switching_score(C = 1, n_sim = 100)
+par(mar = c(5, 5, 4, 2))
+
+hist(scores_lowCa,
+     breaks = 20,
+     col = rgb(0.2, 0.4, 1, 0.5),
+     xlim = c(0, 1),
+     main = "ADD3-L activation score with A<->B switching",
+     xlab = "Fraction of time in active (metastatic) state",
+     ylab = "Frequency")
+
+hist(scores_highCa,
+     breaks = 20,
+     col = rgb(1, 0.3, 0.3, 0.5),
+     add = TRUE)
+
+legend("topleft",
+       legend = c("Calcium-poor", "Calcium-rich"),
+       fill = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)),
+       border = NA,
+       cex = 1)
+
+###exon etkisi katiyorum
+# Exon14 etkisi: 0=ADD3-S, 1=ADD3-L
+# ADD3-L için aktivasyon artar (kAB ↑) ve geri dönüş azalır (kBA ↓)
+alpha_E <- 2.0   # exon14'ün kAB'yi artırma katsayısı
+beta_E  <- 0.5   # exon14'ün kBA'yı azaltma katsayısı
+simulate_switching_score_isoform <- function(C, E, n_sim = 200) {
+  # Base rates from your model
+  theta <- theta_base / (1 + C)
+  kAB_base <- 1 / (k * theta)               # A -> B
+  kBA_base <- max(1e-6, kBA_0 - kBA_1 * C)  # B -> A
+  
+  # Exon14 modulation
+  kAB <- kAB_base * exp(alpha_E * E)
+  kBA <- kBA_base * exp(-beta_E  * E)
+  
+  scores <- numeric(n_sim)
+  
+  for (i in 1:n_sim) {
+    state <- rep(0, length(time))  # 0=A, 1=B
+    for (t in 2:length(time)) {
+      if (state[t-1] == 0) {
+        p <- min(1, kAB * dt)
+        state[t] <- rbinom(1, 1, p)
+      } else {
+        p <- min(1, kBA * dt)
+        back <- rbinom(1, 1, p)
+        state[t] <- ifelse(back == 1, 0, 1)
+      }
+    }
+    scores[i] <- mean(state)
+  }
+  scores
+}
+set.seed(1)
+
+# Calcium-poor (C=0)
+S_low  <- simulate_switching_score_isoform(C = 0, E = 0, n_sim = 200)  # ADD3-S
+L_low  <- simulate_switching_score_isoform(C = 0, E = 1, n_sim = 200)  # ADD3-L
+
+# Calcium-rich (C=1)
+S_high <- simulate_switching_score_isoform(C = 1, E = 0, n_sim = 200)  # ADD3-S
+L_high <- simulate_switching_score_isoform(C = 1, E = 1, n_sim = 200)  # ADD3-L
+par(mfrow = c(1,2), mar = c(5,5,4,1))
+
+# Calcium-poor panel
+hist(S_low, breaks = 20, col = rgb(0.2,0.4,1,0.5), xlim = c(0,1),
+     main = "Calcium-poor (C=0)", xlab = "Activation score", ylab = "Frequency")
+hist(L_low, breaks = 20, col = rgb(1,0.3,0.3,0.5), add = TRUE)
+legend("topleft", legend = c("ADD3-S (E=0)", "ADD3-L (E=1)"),
+       fill = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)), border = NA, cex = 0.9)
+
+# Calcium-rich panel
+hist(S_high, breaks = 20, col = rgb(0.2,0.4,1,0.5), xlim = c(0,1),
+     main = "Calcium-rich (C=1)", xlab = "Activation score", ylab = "Frequency")
+hist(L_high, breaks = 20, col = rgb(1,0.3,0.3,0.5), add = TRUE)
+legend("topleft", legend = c("ADD3-S (E=0)", "ADD3-L (E=1)"),
+       fill = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)), border = NA, cex = 0.9)
+
+par(mfrow = c(1,1))
+#bunu yapinca borderlerden oturu siyah gibi cikti
+# ---- Panel ayarları ----
+par(mfrow = c(1,2), mar = c(5,5,4,1))
+
+# ---- Calcium-poor (C = 0) ----
+hist(S_low,
+     breaks = 20,
+     col = rgb(0.2, 0.4, 1, 0.5),
+     xlim = c(0,1),
+     main = "Calcium-poor (C=0)",
+     xlab = "Activation score",
+     ylab = "Frequency",
+     border = NA)
+
+hist(L_low,
+     breaks = 20,
+     col = rgb(1, 0.3, 0.3, 0.5),
+     add = TRUE,
+     border = NA)
+
+legend("topleft",
+       legend = c("ADD3-S (E=0)", "ADD3-L (E=1)"),
+       fill   = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)),
+       border = NA,
+       bty = "n",
+       cex = 0.9)
+
+# ---- Calcium-rich (C = 1) ----
+hist(S_high,
+     breaks = 20,
+     col = rgb(0.2, 0.4, 1, 0.5),
+     xlim = c(0,1),
+     main = "Calcium-rich (C=1)",
+     xlab = "Activation score",
+     ylab = "Frequency",
+     border = NA)
+
+hist(L_high,
+     breaks = 20,
+     col = rgb(1, 0.3, 0.3, 0.5),
+     add = TRUE,
+     border = NA)
+
+legend("topleft",
+       legend = c("ADD3-S (E=0)", "ADD3-L (E=1)"),
+       fill   = c(rgb(0.2,0.4,1,0.5), rgb(1,0.3,0.3,0.5)),
+       border = NA,
+       bty = "n",
+       cex = 0.9)
+
+# ---- Reset ----
+par(mfrow = c(1,1))
+#####
+##gammalari goruyorum
+# Gamma parametreleri (senin modelden)
+k <- 3
+theta_base <- 20
+
+theta_low  <- theta_base / (1 + 0)  # C = 0
+theta_high <- theta_base / (1 + 1)  # C = 1
+
+# Zaman ekseni
+t <- seq(0, 200, by = 0.5)
+
+# Gamma yoğunlukları
+gamma_low  <- dgamma(t, shape = k, scale = theta_low)
+gamma_high <- dgamma(t, shape = k, scale = theta_high)
+
+# Çizim
+plot(t, gamma_low, type = "l", lwd = 3, col = "blue",
+     xlab = "Activation time",
+     ylab = "Density",
+     main = "Gamma-distributed activation time (ADD3)")
+
+lines(t, gamma_high, lwd = 3, col = "red")
+
+legend("topright",
+       legend = c("Calcium-poor (C=0)", "Calcium-rich (C=1)"),
+       col = c("blue", "red"),
+       lwd = 3,
+       bty = "n")
+
+plot(t, gamma_low, type = "l", lwd = 3, col = "blue",
+     xlab = "Activation time",
+     ylab = "Density",
+     main = "Gamma-distributed activation time",
+     ylim = c(0, max(gamma_low, gamma_high)))
+
+lines(t, gamma_high, lwd = 3, col = "red")
+####
+##levens test
+# Gerekli paket
+library(car)
+
+### 1) Calcium-rich (C = 1) için varyans (noise) karşılaştırması
+
+# ADD3-S ve ADD3-L skorları zaten sende var:
+# S_high , L_high
+
+# Varyanslar (bilgi amaçlı)
+var(S_high)
+var(L_high)
+
+# Levene testi
+values_high <- c(S_high, L_high)
+group_high  <- factor(c(rep("ADD3-S", length(S_high)),
+                        rep("ADD3-L", length(L_high))))
+
+leveneTest(values_high ~ group_high)
+###
+### 2) Calcium-poor (C = 0)
+
+var(S_low)
+var(L_low)
+
+values_low <- c(S_low, L_low)
+group_low  <- factor(c(rep("ADD3-S", length(S_low)),
+                       rep("ADD3-L", length(L_low))))
+
+leveneTest(values_low ~ group_low)
+
+#levenes test gorsllestirmesi 
+vars <- c(var(S_low), var(L_low), var(S_high), var(L_high))
+group <- c("S_low", "L_low", "S_high", "L_high")
+
+barplot(vars,
+        names.arg = group,
+        ylab = "Variance (noise)",
+        col = c("steelblue", "tomato", "steelblue", "tomato"),
+        main = "Activation noise (variance)")
+
+
+###tek leveenes
+library(car)
+
+values <- c(S_low, L_low, S_high, L_high)
+
+group <- factor(c(
+  rep("C0_S", length(S_low)),
+  rep("C0_L", length(L_low)),
+  rep("C1_S", length(S_high)),
+  rep("C1_L", length(L_high))
+))
+
+leveneTest(values ~ group, center = median)
+par(mfrow = c(1,1))  # ekranı tekrar tek panele alır
+library(car)
+
+# ---- 1) Tüm değerleri tek vektörde topla ----
+values_all <- c(S_low, L_low, S_high, L_high)
+
+groups_all <- factor(c(
+  rep("C0_S", length(S_low)),   # Calcium-poor, ADD3-S
+  rep("C0_L", length(L_low)),   # Calcium-poor, ADD3-L
+  rep("C1_S", length(S_high)),  # Calcium-rich, ADD3-S
+  rep("C1_L", length(L_high))   # Calcium-rich, ADD3-L
+))
+
+# ---- 2) Levene’s Test (varyans karşılaştırması) ----
+leveneTest(values_all ~ groups_all, center = median)
+
+# ---- Veriyi hazırla ----
+values_all <- c(S_low, L_low, S_high, L_high)
+
+groups_all <- factor(c(
+  rep("C0_S", length(S_low)),
+  rep("C0_L", length(L_low)),
+  rep("C1_S", length(S_high)),
+  rep("C1_L", length(L_high))
+),
+levels = c("C0_S","C0_L","C1_S","C1_L"))
+
+# ---- Çizim ----
+par(mfrow = c(1,1), mar = c(5,5,4,2))
+
+boxplot(values_all ~ groups_all,
+        col = c("lightblue","salmon","lightblue","salmon"),
+        ylab = "Activation score",
+        xlab = "",
+        main = "Variance comparison across calcium & isoform",
+        outline = FALSE)
+
+stripchart(values_all ~ groups_all,
+           vertical = TRUE,
+           method = "jitter",
+           pch = 16,
+           col = rgb(0,0,0,0.35),
+           add = TRUE)

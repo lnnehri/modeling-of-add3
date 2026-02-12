@@ -1,0 +1,340 @@
+###3D model
+## =========================
+## STEP 1 — Spatial Ca(x) field in a 3D spherical cell
+## =========================
+
+set.seed(1)
+
+# --- 1) Cell geometry (3D sphere) ---
+R_cell <- 1.0                 # cell radius (arbitrary units)
+step   <- 0.08                # grid resolution (smaller = finer, slower)
+coords <- expand.grid(
+  x = seq(-R_cell, R_cell, by = step),
+  y = seq(-R_cell, R_cell, by = step),
+  z = seq(-R_cell, R_cell, by = step)
+)
+coords$r <- sqrt(coords$x^2 + coords$y^2 + coords$z^2)
+
+# keep only points inside the sphere
+cell <- coords[coords$r <= R_cell, ]
+n <- nrow(cell)
+
+# --- 2) Calcium baseline profile: higher near membrane ---
+# radial mean profile mu(r): increases toward r=R_cell
+Ca_min <- 0.2
+Ca_max <- 1.0
+cell$mu_r <- Ca_min + (Ca_max - Ca_min) * (cell$r / R_cell)^pmax(1, 1)  # linear in r
+
+# add multiplicative noise (log-normal is nice for positive concentrations)
+sigma_ln <- 0.25
+cell$Ca_base <- rlnorm(n, meanlog = log(cell$mu_r), sdlog = sigma_ln)
+
+# --- 3) Exon-14 "calcium island" as a local bias (only for E=1) ---
+E <- 1               # 0=ADD3-S, 1=ADD3-L  (change later if needed)
+delta_E <- 0.7       # 70% local increase near exon site (your hypothesis)
+
+# choose an exon-14 location inside the cell (example: near cortex)
+exon_pos <- c(x = 0.6, y = 0.0, z = 0.0) * R_cell
+island_radius <- 0.18 * R_cell
+
+dist_to_exon <- sqrt((cell$x - exon_pos["x"])^2 + (cell$y - exon_pos["y"])^2 + (cell$z - exon_pos["z"])^2)
+cell$is_island <- dist_to_exon <= island_radius
+
+# apply local boost only if E=1
+cell$Ca <- cell$Ca_base * ifelse(E == 1 & cell$is_island, (1 + delta_E), 1)
+
+# --- 4) Quick sanity checks (numbers + simple 1D summaries) ---
+cat("Points in cell:", n, "\n")
+cat("Ca summary (all):\n"); print(summary(cell$Ca))
+cat("Ca mean in island vs outside:\n")
+print(tapply(cell$Ca, cell$is_island, mean))
+
+# optional quick plot: Ca vs radius
+plot(cell$r, cell$Ca, pch = 16, cex = 0.4,
+     xlab = "Radius r", ylab = "Calcium Ca(x)",
+     main = "Spatial calcium field Ca(x) inside spherical cell")
+
+
+#####STEP2
+set.seed(1)
+
+# Hücre yarıçapı boyunca noktalar
+n_points <- 5000
+r <- runif(n_points, min = 0, max = 1)  # 0 = merkez, 1 = membran
+
+# Calcium alanı Ca(x): çepere doğru artan + gürültü
+Ca_mean <- 0.3 + 0.8 * r
+Ca_sd   <- 0.15
+
+Ca_x <- rnorm(n_points, mean = Ca_mean, sd = Ca_sd)
+Ca_x[Ca_x < 0] <- 0  # negatif olmasın
+summary(Ca_x)
+
+# ---- Ca(x) → Poisson hızına çevir ----
+lambda_base <- 0.2    # bazal CaM aktivasyon oranı
+lambda_scale <- 1.5   # calciumun olaya etkisi
+
+lambda_x <- lambda_base + lambda_scale * Ca_x
+# Simülasyon süresi
+T_window <- 10  # örn. 10 zaman birimi
+
+# Her uzamsal noktadaki Ca–CaM event sayısı
+CaM_events <- rpois(length(lambda_x), lambda = lambda_x * T_window)
+# Radius'a karşı event sayısı
+plot(r, CaM_events,
+     pch = 16, cex = 0.4,
+     xlab = "Radius r",
+     ylab = "Number of Ca–CaM events",
+     main = "Poisson Ca–CaM activation events across cell radius")
+####STEP3
+set.seed(1)
+
+# --- Parametreler ---
+n_points <- 2000
+r <- runif(n_points, 0, 1)
+
+# Daha önce tanımladığımız calcium alanı
+Ca_x <- 0.3 + 1.2 * r + rnorm(n_points, 0, 0.15)
+Ca_x[Ca_x < 0] <- 0
+
+# Poisson hızı (Ca-CaM aktivasyon oranı)
+lambda_base  <- 0.2
+lambda_scale <- 1.5
+lambda_x <- lambda_base + lambda_scale * Ca_x
+
+# --- Gamma için biyolojik varsayım ---
+k_hits <- 4
+# k = aktivasyon için gereken CaM temas sayısı
+
+# Gamma scale = 1 / lambda
+theta_x <- 1 / lambda_x
+
+# Aktivasyon süreleri
+T_act <- rgamma(n_points, shape = k_hits, scale = theta_x)
+
+# --- Görselleştirme ---
+plot(r, T_act,
+     pch = 16, cex = 0.6,
+     xlab = "Radius r",
+     ylab = "Activation time (Gamma)",
+     main = "Gamma-distributed ADD3 activation time\nfrom Poisson Ca–CaM events")
+####
+###STE4 Exon-14 ekliyoruz
+set.seed(1)
+
+# Hücre yarıçapı
+R <- 1
+
+# Exon-14 konumu (çepere yakın)
+exon_pos <- c(0.8, 0, 0)  # (x,y,z)
+n_points <- 2000
+
+# Küre içinde rastgele noktalar
+rand_unit_sphere <- function(n) {
+  u <- matrix(rnorm(3*n), ncol=3)
+  u <- u / sqrt(rowSums(u^2))
+  r <- runif(n)^(1/3)
+  u * r
+}
+
+coords <- rand_unit_sphere(n_points)
+r <- sqrt(rowSums(coords^2))
+
+# Bazal Ca alanı
+Ca_base <- 0.3 + 0.8 * r
+# Exon etkisi
+hotspot_radius <- 0.15
+hotspot_strength <- 1.8  # lokal Ca artışı
+
+# Exon noktasına mesafe
+dist_exon <- sqrt(rowSums((coords -
+                             matrix(exon_pos, nrow=n_points,
+                                    ncol=3, byrow=TRUE))^2))
+
+# ADD3-S (E=0): değişiklik yok
+Ca_S <- Ca_base
+
+# ADD3-L (E=1): hotspot varsa Ca artar
+Ca_L <- Ca_base
+Ca_L[dist_exon < hotspot_radius] <-
+  Ca_L[dist_exon < hotspot_radius] * hotspot_strength
+summary(Ca_S)
+summary(Ca_L)
+# Poisson parametreleri
+lambda_base  <- 0.5    # Ca'dan bağımsız bazal aktivite
+lambda_scale <- 2.0    # Ca'nın olaya katkısı
+
+# ADD3-S ve ADD3-L için yerel Poisson hızları
+lambda_S <- lambda_base + lambda_scale * Ca_S
+lambda_L <- lambda_base + lambda_scale * Ca_L
+events_S <- rpois(n_points, lambda = lambda_S)
+events_L <- rpois(n_points, lambda = lambda_L)
+mean(events_S); mean(events_L)
+quantile(events_S, c(0.05, 0.5, 0.95))
+quantile(events_L, c(0.05, 0.5, 0.95))
+plot(r, events_L,
+     pch = 16, cex = 0.4,
+     xlab = "Radius r",
+     ylab = "Poisson Ca–CaM events",
+     main = "Spatial Poisson Ca–CaM activation (ADD3-L)")
+
+
+####STEP5 gamma
+set.seed(1)
+
+# --- Parametreler ---
+k_hits <- 3            # aktivasyon için gereken Ca–CaM event sayısı
+lambda_base <- 0.5     # bazal Poisson hızı
+lambda_scale <- 2.0    # calcium etkisi
+
+# Radius ve calcium alanı (öncekinden geliyor)
+n <- 1000
+r <- runif(n, 0, 1)
+Ca_x <- 0.3 + 1.2 * r  # peripheral calcium artışı
+
+# Lokal Poisson hızı
+lambda_x <- lambda_base + lambda_scale * Ca_x
+
+# --- Gamma aktivasyon süresi ---
+T_act <- rgamma(
+  n,
+  shape = k_hits,
+  scale = 1 / lambda_x
+)
+
+# Görselleştirme
+plot(r, T_act, pch = 16, cex = 0.6,
+     xlab = "Radius r",
+     ylab = "Activation time (Gamma)",
+     main = "Gamma-distributed ADD3-L activation time")
+
+
+###MARKOV
+## --- Gamma tabanlı aktivasyon süresi ---
+# Poisson Ca–CaM hitlerinden gelen Gamma
+k <- 3
+theta_base <- 2          # aktivasyonun karakteristik süresi
+C <- 1                   # calcium context (0–1 arası olabilir)
+
+theta <- theta_base / (1 + C)
+
+# Gamma’dan tek bir aktivasyon süresi örneği
+T_act <- rgamma(1, shape = k, scale = theta)
+
+# Gamma → Markov geçiş hızı
+kAB <- 1 / T_act
+kAB
+## --- Markov switching ---
+T_total <- 1000
+dt <- 1
+time <- seq(0, T_total, by = dt)
+
+# Geri dönüş hızı (B → A)
+kBA_0 <- 0.02
+kBA_1 <- 0.015
+kBA <- max(1e-6, kBA_0 - kBA_1 * C)
+
+state <- rep(0, length(time))  # 0 = A (stable), 1 = B (active)
+
+for (t in 2:length(time)) {
+  if (state[t-1] == 0) {
+    state[t] <- rbinom(1, 1, min(1, kAB * dt))
+  } else {
+    state[t] <- ifelse(rbinom(1, 1, min(1, kBA * dt)) == 1, 0, 1)
+  }
+}
+
+activation_score <- mean(state)
+activation_score
+plot(time, state, type = "s",
+     ylab = "ADD3 state (0 = stable, 1 = active)",
+     xlab = "Time",
+     main = "Gamma-driven Markov switching (A ⇄ B)")
+
+
+#######COKLU MARKOV
+set.seed(1)
+
+# --- Zaman ---
+T_total <- 1000
+dt <- 1
+time <- seq(0, T_total, by = dt)
+
+# --- Parametreler ---
+k <- 3
+theta_base <- 20
+
+kBA_0 <- 0.02
+kBA_1 <- 0.015
+
+# --- Tek hücre için dwell time hesaplayan fonksiyon ---
+simulate_dwell_times <- function(C) {
+  
+  theta <- theta_base / (1 + C)
+  kAB <- 1 / (k * theta)                 # A -> B
+  kBA <- max(1e-6, kBA_0 - kBA_1 * C)    # B -> A
+  
+  state <- rep(0, length(time))          # 0=A, 1=B
+  dwell_B <- c()
+  current_dwell <- 0
+  
+  for (t in 2:length(time)) {
+    if (state[t-1] == 0) {
+      state[t] <- rbinom(1, 1, min(1, kAB * dt))
+    } else {
+      back <- rbinom(1, 1, min(1, kBA * dt))
+      state[t] <- ifelse(back == 1, 0, 1)
+    }
+    
+    # B durumunda kalış süresi
+    if (state[t] == 1) {
+      current_dwell <- current_dwell + dt
+    } else {
+      if (current_dwell > 0) {
+        dwell_B <- c(dwell_B, current_dwell)
+        current_dwell <- 0
+      }
+    }
+  }
+  
+  dwell_B
+}
+n_cells <- 1000
+
+dwell_low  <- unlist(replicate(n_cells, simulate_dwell_times(C = 0), simplify = FALSE))
+dwell_high <- unlist(replicate(n_cells, simulate_dwell_times(C = 1), simplify = FALSE))
+par(mfrow = c(1,2), mar = c(5,5,4,1))
+
+hist(dwell_low,
+     breaks = 40,
+     col = rgb(0.2,0.4,1,0.6),
+     border = NA,
+     main = "Calcium-poor (C=0)\nB-state dwell time",
+     xlab = "Time in active state")
+
+hist(dwell_high,
+     breaks = 40,
+     col = rgb(1,0.3,0.3,0.6),
+     border = NA,
+     main = "Calcium-rich (C=1)\nB-state dwell time",
+     xlab = "Time in active state")
+
+par(mfrow = c(1,1))
+mean(dwell_low);  sd(dwell_low)
+mean(dwell_high); sd(dwell_high)
+#yukaridaki histogram veriyor simdi baska
+# ECDF plot for B-state dwell time
+plot(ecdf(dwell_low),
+     col = "blue", lwd = 3,
+     xlab = "Time in active state (B-state dwell time)",
+     ylab = "Cumulative probability",
+     main = "ECDF of B-state dwell time")
+
+lines(ecdf(dwell_high),
+      col = "red", lwd = 3)
+
+legend("bottomright",
+       legend = c("Calcium-poor (C=0)", "Calcium-rich (C=1)"),
+       col = c("blue", "red"),
+       lwd = 3,
+       bty = "n")

@@ -1,0 +1,663 @@
+# --- Settings --- Salomon et al daki bilgiyle ben simdi
+#modelliyorum nucleusa girse cikisi naisl olur diye
+
+T_total <- 1000
+dt <- 1
+time <- seq(0, T_total, by = dt)
+
+# Calcium & exon
+C <- 1      # 0 or 1
+E <- 1      # 0=short, 1=long
+
+# ---- Rates from Model I ----
+k <- 3
+theta_base <- 20
+theta <- theta_base / (1 + C)
+
+k_MC <- 1 / (k * theta)          # M -> C (activation/release)
+k_CM <- 0.02                     # C -> M (re-stabilization)
+
+# Nuclear shuttling
+k_CN_base <- 0.01                # C -> N entry
+k_NC_base <- 0.02                # N -> C export
+
+k_CN <- k_CN_base * (1 + C)      # calcium increases entry
+k_NC <- k_NC_base * exp(-0.5 * E)  # exon14 slows export
+
+# --- State coding ---
+# 0 = M (membrane-bound)
+# 1 = C (cytoplasmic free)
+# 2 = N (nuclear)
+
+state <- numeric(length(time))
+state[1] <- 0   # start in M
+
+for (t in 2:length(time)) {
+  
+  if (state[t-1] == 0) {
+    # M -> C
+    p <- min(1, k_MC * dt)
+    state[t] <- ifelse(rbinom(1,1,p)==1, 1, 0)
+    
+  } else if (state[t-1] == 1) {
+    # C -> M or N
+    p_CM <- min(1, k_CM * dt)
+    p_CN <- min(1, k_CN * dt)
+    
+    r <- runif(1)
+    if (r < p_CM) {
+      state[t] <- 0
+    } else if (r < p_CM + p_CN) {
+      state[t] <- 2
+    } else {
+      state[t] <- 1
+    }
+    
+  } else if (state[t-1] == 2) {
+    # N -> C
+    p <- min(1, k_NC * dt)
+    state[t] <- ifelse(rbinom(1,1,p)==1, 1, 2)
+  }
+}
+
+# ---- Occupancy fractions ----
+M_frac <- mean(state == 0)
+C_frac <- mean(state == 1)
+N_frac <- mean(state == 2)
+
+M_frac
+C_frac
+N_frac
+
+plot(time, state, type="s",
+     ylab="State (0=M,1=C,2=N)",
+     xlab="Time",
+     main="3-state ADD3-L dynamics")
+
+####
+# --- Settings ---
+T_total <- 1000
+dt <- 1
+time <- seq(0, T_total, by = dt)
+
+# Base parameters
+k <- 3
+theta_base <- 20
+k_CM <- 0.02              # C -> M
+k_CN_base <- 0.01         # C -> N
+k_NC_base <- 0.02         # N -> C
+
+simulate_3state <- function(C, E, n_sim = 300) {
+  
+  results <- matrix(0, nrow = n_sim, ncol = 3)
+  colnames(results) <- c("M", "C", "N")
+  
+  for (s in 1:n_sim) {
+    
+    theta <- theta_base / (1 + C)
+    k_MC <- 1 / (k * theta)
+    
+    k_CN <- k_CN_base * (1 + C)
+    k_NC <- k_NC_base * exp(-0.5 * E)
+    
+    state <- numeric(length(time))
+    state[1] <- 0
+    
+    for (t in 2:length(time)) {
+      
+      if (state[t-1] == 0) {
+        p <- min(1, k_MC * dt)
+        state[t] <- ifelse(rbinom(1,1,p)==1, 1, 0)
+        
+      } else if (state[t-1] == 1) {
+        p_CM <- min(1, k_CM * dt)
+        p_CN <- min(1, k_CN * dt)
+        
+        r <- runif(1)
+        if (r < p_CM) {
+          state[t] <- 0
+        } else if (r < p_CM + p_CN) {
+          state[t] <- 2
+        } else {
+          state[t] <- 1
+        }
+        
+      } else if (state[t-1] == 2) {
+        p <- min(1, k_NC * dt)
+        state[t] <- ifelse(rbinom(1,1,p)==1, 1, 2)
+      }
+    }
+    
+    results[s,1] <- mean(state == 0)
+    results[s,2] <- mean(state == 1)
+    results[s,3] <- mean(state == 2)
+  }
+  
+  colMeans(results)
+}
+
+# --- Run conditions ---
+C0_S <- simulate_3state(C=0, E=0)
+C0_L <- simulate_3state(C=0, E=1)
+C1_S <- simulate_3state(C=1, E=0)
+C1_L <- simulate_3state(C=1, E=1)
+
+# Combine
+res <- rbind(C0_S, C0_L, C1_S, C1_L)
+rownames(res) <- c("C0_S", "C0_L", "C1_S", "C1_L")
+
+res
+
+barplot(t(res),
+        beside=TRUE,
+        col=c("steelblue","orange","darkgreen"),
+        legend.text=TRUE,
+        args.legend=list(x="topright"),
+        ylab="Steady-state fraction",
+        main="3-state ADD3-L occupancy")
+
+
+### Continuous calcium grid
+C_grid <- seq(0, 1, by = 0.05)
+
+get_N_fraction <- function(C, E) {
+  simulate_3state(C, E, n_sim = 200)["N"]
+}
+
+N_S <- sapply(C_grid, get_N_fraction, E = 0)
+N_L <- sapply(C_grid, get_N_fraction, E = 1)
+
+plot(C_grid, N_S, type="l", lwd=3, col="steelblue",
+     xlab="Calcium level (continuous)",
+     ylab="Nuclear fraction",
+     main="Calcium-dependent nuclear redistribution")
+
+lines(C_grid, N_L, lwd=3, col="firebrick")
+
+legend("topleft",
+       legend=c("ADD3-S", "ADD3-L (Exon14)"),
+       col=c("steelblue","firebrick"),
+       lwd=3,
+       bty="n")
+###
+par(mar = c(6,5,3,2))  # üst marjı küçülttük
+
+col_states <- c("#4C78A8", "#F58518", "#54A24B")
+
+bp <- barplot(t(res),
+              beside = TRUE,
+              col = col_states,
+              ylab = "Steady-state fraction",
+              main = "3-state ADD3-L occupancy",
+              ylim = c(0, 0.6))
+
+legend("topright",
+       legend = c("M (membrane-bound)",
+                  "C (cytoplasmic free)",
+                  "N (nuclear)"),
+       fill = col_states,
+       bty = "n")
+par(mar = c(6,5,3,2))
+
+# Daha soft, akademik tonlar
+col_states <- c("#7FA6B7",  # M
+                "#E07A73",  # C
+                "#5E8E3E")  # N
+
+barplot(t(res),
+        beside = TRUE,
+        col = col_states,
+        ylab = "Steady-state fraction",
+        ylim = c(0, 0.6),
+        border = NA)
+
+title("3-state ADD3-L occupancy")
+
+legend("topright",
+       legend = c("M (membrane-bound)",
+                  "C (cytoplasmic free)",
+                  "N (nuclear)"),
+       fill = col_states,
+       bty = "n")
+
+
+###simdi dis datasetlerden bakiyorum
+###GSE274620
+# GSE274620
+# Human hESC to cardiomyocyte differentiation time-course
+# Bulk RNA-seq across 10 time points (2 replicates)
+# Temporal gene expression dynamics during cardiac development
+# Dosya yolu
+fp <- "/Users/lemannur/Downloads/GSE274620_AK_RNAseq_hESCtoCardiomyocyteDifferentiation_NormalizedCounts.tsv"
+
+# TSV oku
+df <- read.delim(fp, header = TRUE, sep = "\t", check.names = FALSE, stringsAsFactors = FALSE)
+
+# İlk bakış
+dim(df)
+head(df[, 1:min(6, ncol(df))])
+rownames(df) <- df$gene_name
+df$gene_name <- NULL
+
+dim(df)
+str(df[1:5,1:3])
+df <- as.data.frame(lapply(df, as.numeric), row.names = rownames(df))
+log_df <- log2(df + 1)
+# ADD3 var mı kontrol et
+"ADD3" %in% rownames(df)
+
+# Ekspresyonunu al
+add3_exp <- df["ADD3", ]
+
+add3_exp
+add3_log <- log2(add3_exp + 1)
+add3_log
+# Gün bilgisini çıkar
+days <- gsub(".*Day", "Day", colnames(df))
+days_num <- as.numeric(gsub("Day", "", days))
+
+plot(days_num, as.numeric(add3_log),
+     type = "b",
+     pch = 19,
+     xlab = "Day",
+     ylab = "log2(normalized expression)",
+     main = "ADD3 expression over differentiation")
+max(add3_log) - min(add3_log)
+
+#cadherinlere bakicam 
+grep("^CDH", rownames(df), value = TRUE)
+cdh_genes <- grep("^CDH", rownames(df), value = TRUE)
+
+cdh_log <- log_df[cdh_genes, ]
+dim(cdh_log)
+days <- as.numeric(gsub(".*Day", "", colnames(df)))
+
+matplot(days, t(cdh_log),
+        type = "l",
+        lty = 1,
+        col = rainbow(length(cdh_genes)),
+        xlab = "Day",
+        ylab = "log2(expression)")
+#en cok degisen 5 cadherin, yukaridaki tum cadherinlerin degisimi
+cdh_range <- apply(cdh_log, 1, function(x) max(x) - min(x))
+top_cdh <- names(sort(cdh_range, decreasing = TRUE)[1:5])
+
+top_cdh
+matplot(days, t(cdh_log[top_cdh, ]),
+        type = "b",
+        pch = 19,
+        lty = 1,
+        col = 1:length(top_cdh),
+        xlab = "Day",
+        ylab = "log2(expression)")
+
+legend("topright",
+       legend = top_cdh,
+       col = 1:length(top_cdh),
+       lty = 1,
+       pch = 19)
+
+#klasik EMT iliskili cadherinler 1 ve 2
+matplot(days,
+        t(log_df[c("CDH1","CDH2"), ]),
+        type = "b",
+        pch = 19,
+        lty = 1,
+        col = c("blue","red"),
+        xlab = "Day",
+        ylab = "log2(expression)")
+
+legend("topright",
+       legend = c("CDH1","CDH2"),
+       col = c("blue","red"),
+       lty = 1,
+       pch = 19)
+##vimentin bakiyoruz
+"VIM" %in% rownames(df)
+vim_log <- log_df["VIM", ]
+vim_log
+plot(days, as.numeric(vim_log),
+     type = "b",
+     pch = 19,
+     col = "purple",
+     xlab = "Day",
+     ylab = "log2(expression)",
+     main = "VIM expression over differentiation")
+##e cad ve vmentin birlikte
+matplot(days,
+        t(log_df[c("CDH1","CDH2","VIM"), ]),
+        type = "b",
+        pch = 19,
+        lty = 1,
+        col = c("blue","red","purple"),
+        xlab = "Day",
+        ylab = "log2(expression)")
+
+legend("topright",
+       legend = c("CDH1","CDH2","VIM"),
+       col = c("blue","red","purple"),
+       lty = 1,
+       pch = 19)
+#simdi sunlara bakyiorum
+c("CDH1","VIM","ADD3") %in% rownames(log_df)
+genes3 <- c("CDH1","VIM","ADD3")
+sub3 <- log_df[genes3, ]
+matplot(days,
+        t(sub3),
+        type = "b",
+        pch = 19,
+        lty = 1,
+        col = c("blue","purple","black"),
+        xlab = "Day",
+        ylab = "log2(expression)")
+
+legend("topright",
+       legend = genes3,
+       col = c("blue","purple","black"),
+       lty = 1,
+       pch = 19)
+
+
+#ortalama aliyorum
+# Gün numaralarını çıkar
+days <- as.numeric(gsub(".*Day", "", colnames(log_df)))
+
+# Unique günler
+u_days <- sort(unique(days))
+
+genes3 <- c("CDH1","VIM","ADD3")
+
+mean_mat <- sapply(u_days, function(d){
+  cols <- which(days == d)
+  rowMeans(log_df[genes3, cols, drop = FALSE])
+})
+
+colnames(mean_mat) <- u_days
+mean_mat
+matplot(u_days,
+        t(mean_mat),
+        type = "b",
+        pch = 19,
+        lty = 1,
+        col = c("blue","purple","black"),
+        xlab = "Day",
+        ylab = "Mean log2(expression)")
+
+legend("topright",
+       legend = genes3,
+       col = c("blue","purple","black"),
+       lty = 1,
+       pch = 19)
+
+#korelasyon bakiyoruz
+add3_vec <- as.numeric(mean_mat["ADD3", ])
+vim_vec  <- as.numeric(mean_mat["VIM", ])
+cdh1_vec <- as.numeric(mean_mat["CDH1", ])
+cor_add3_vim  <- cor(add3_vec, vim_vec,  method = "pearson")
+cor_add3_cdh1 <- cor(add3_vec, cdh1_vec, method = "pearson")
+
+cor_add3_vim
+cor_add3_cdh1
+cor.test(add3_vec, vim_vec)
+cor.test(add3_vec, cdh1_vec)
+plot(vim_vec, add3_vec,
+     pch = 19,
+     col = "purple",
+     xlab = "Mean VIM expression",
+     ylab = "Mean ADD3 expression",
+     main = "ADD3 vs VIM")
+
+abline(lm(add3_vec ~ vim_vec), col = "black", lwd = 2)
+
+cor(add3_vec, vim_vec)
+plot(cdh1_vec, add3_vec,
+     pch = 19,
+     col = "blue",
+     xlab = "Mean CDH1 expression",
+     ylab = "Mean ADD3 expression",
+     main = "ADD3 vs CDH1")
+
+abline(lm(add3_vec ~ cdh1_vec), col = "black", lwd = 2)
+
+cor(add3_vec, cdh1_vec)
+##cadherin 2 ile bakiyorum
+genes4 <- c("CDH1","CDH2","VIM","ADD3")
+mean_mat2 <- sapply(u_days, function(d){
+  cols <- which(days == d)
+  rowMeans(log_df[genes4, cols, drop = FALSE])
+})
+
+colnames(mean_mat2) <- u_days
+mean_mat2
+add3_vec  <- as.numeric(mean_mat2["ADD3", ])
+cdh2_vec  <- as.numeric(mean_mat2["CDH2", ])
+
+cor.test(add3_vec, cdh2_vec)
+plot(cdh2_vec, add3_vec,
+     pch = 19,
+     col = "red",
+     xlab = "Mean CDH2 expression",
+     ylab = "Mean ADD3 expression",
+     main = "ADD3 vs CDH2")
+
+abline(lm(add3_vec ~ cdh2_vec), col = "black", lwd = 2)
+#
+##
+# Vektörleri al
+add3_vec <- as.numeric(mean_mat2["ADD3", ])
+cdh1_vec <- as.numeric(mean_mat2["CDH1", ])
+cdh2_vec <- as.numeric(mean_mat2["CDH2", ])
+vim_vec  <- as.numeric(mean_mat2["VIM", ])
+
+days_unique <- as.numeric(colnames(mean_mat2))
+
+# Plot başlat
+plot(days_unique, cdh1_vec,
+     type = "b",
+     pch = 19,
+     col = "blue",
+     ylim = range(c(add3_vec, cdh1_vec, cdh2_vec, vim_vec)),
+     xlab = "Day",
+     ylab = "Mean log2(expression)",
+     main = "ADD3 and Cadherin/Vimentin dynamics")
+
+# Diğerleri
+lines(days_unique, cdh2_vec, type = "b", pch = 19, col = "red")
+lines(days_unique, vim_vec,  type = "b", pch = 19, col = "purple")
+lines(days_unique, add3_vec, type = "b", pch = 19, col = "black")
+
+# Legend
+legend("topright",
+       legend = c("CDH1 (E-cadherin)",
+                  "CDH2 (N-cadherin)",
+                  "VIM",
+                  "ADD3"),
+       col = c("blue","red","purple","black"),
+       pch = 19,
+       lwd = 1)
+#label figurun ustune geliyor
+
+#calcaium bakitorum
+calcium_genes <- c("CALM1","CALM2","CALM3",
+                   "CAMK2D","PPP3CA",
+                   "NFATC1","NFATC2",
+                   "ITPR1","ORAI1",
+                   "STIM1","ATP2A2","RYR2")
+
+calcium_genes <- calcium_genes[calcium_genes %in% rownames(log_df)]
+
+calcium_score <- colMeans(log_df[calcium_genes, ])
+plot(days, calcium_score,
+     type = "b",
+     pch = 19,
+     col = "darkorange",
+     xlab = "Day",
+     ylab = "Calcium pathway mean log2 expression",
+     main = "Calcium signaling dynamics")
+calcium_mean <- sapply(u_days, function(d){
+  mean(calcium_score[days == d])
+})
+
+plot(u_days, calcium_mean,
+     type = "b",
+     pch = 19,
+     col = "darkorange",
+     xlab = "Day",
+     ylab = "Mean calcium pathway score",
+     main = "Temporal calcium signaling")
+
+##calmoludin bak
+c("CALM1","CALM2","CALM3") %in% rownames(log_df)
+calm_log <- log_df[c("CALM1","CALM2","CALM3"), ]
+calm_log
+calm_mean <- sapply(u_days, function(d){
+  cols <- which(days == d)
+  rowMeans(log_df[c("CALM1","CALM2","CALM3"), cols, drop=FALSE])
+})
+
+colnames(calm_mean) <- u_days
+calm_mean
+
+matplot(u_days, t(calm_mean),
+        type="b",
+        pch=19,
+        col=c("darkgreen","orange","brown"),
+        xlab="Day",
+        ylab="Mean log2(expression)",
+        main="Calmodulin gene expression")
+
+legend("topright",
+       legend=c("CALM1","CALM2","CALM3"),
+       col=c("darkgreen","orange","brown"),
+       pch=19,
+       bty="n")
+###GPCR genlerine bakcam, bir liste olark ladim
+gpcr_score <- colMeans(log_df[gpcr_present, ])
+
+gpcr_mean <- sapply(u_days, function(d){
+  mean(gpcr_score[days == d])
+})
+
+plot(u_days, gpcr_mean,
+     type="b",
+     pch=19,
+     col="darkred",
+     xlab="Day",
+     ylab="Mean GPCR expression",
+     main="Temporal GPCR signaling activity")
+add3_vec <- as.numeric(mean_mat2["ADD3", ])
+
+cor.test(add3_vec, gpcr_mean)
+add3_time <- as.numeric(mean_mat2["ADD3", ])
+
+gpcr_cor <- sapply(gpcr_present, function(g){
+  gene_mat <- sapply(u_days, function(d){
+    mean(log_df[g, days == d])
+  })
+  cor(gene_mat, add3_time)
+})
+
+sort(gpcr_cor, decreasing = TRUE)[1:20]
+#
+gpcr_cor <- sapply(gpcr_present, function(g){
+  
+  gene_mat <- sapply(u_days, function(d){
+    cols <- which(days == d)
+    vals <- as.numeric(log_df[g, cols, drop = TRUE])
+    mean(vals, na.rm = TRUE)
+  })
+  
+  if (all(is.na(gene_mat))) return(NA)
+  if (sd(gene_mat, na.rm = TRUE) == 0) return(NA)
+  
+  cor(gene_mat, add3_time, use = "complete.obs")
+})
+
+sort(na.omit(gpcr_cor), decreasing = TRUE)[1:20]
+gpcr_stats <- lapply(gpcr_present, function(g){
+  
+  gene_mat <- sapply(u_days, function(d){
+    cols <- which(days == d)
+    vals <- as.numeric(log_df[g, cols, drop = TRUE])
+    mean(vals, na.rm = TRUE)
+  })
+  
+  if (all(is.na(gene_mat))) return(NULL)
+  if (sd(gene_mat, na.rm = TRUE) == 0) return(NULL)
+  
+  test <- cor.test(gene_mat, add3_time)
+  
+  data.frame(
+    gene = g,
+    cor = test$estimate,
+    p = test$p.value
+  )
+})
+
+gpcr_stats <- do.call(rbind, gpcr_stats)
+
+gpcr_stats <- gpcr_stats[order(gpcr_stats$p), ]
+
+head(gpcr_stats, 20)
+gpcr_stats$padj <- p.adjust(gpcr_stats$p, method = "BH")
+head(gpcr_stats, 20)
+gpcr_stats$padj <- p.adjust(gpcr_stats$p, method = "BH")
+head(gpcr_stats, 20)
+subset(gpcr_stats, padj < 0.05)
+sig_gpcr <- subset(gpcr_stats, padj < 0.05)$gene
+sig_gpcr
+gpcr_mean_of_these <- sapply(u_days, function(d){
+  cols <- which(days == d)
+  mean(colMeans(log_df[sig_gpcr, cols, drop=FALSE]), na.rm=TRUE)
+})
+cor.test(gpcr_mean_of_these, calcium_mean)
+gpcr_score_sig <- colMeans(log_df[sig_gpcr, ])
+
+gpcr_mean_of_these <- sapply(u_days, function(d){
+  mean(gpcr_score_sig[days == d])
+})
+
+cor.test(gpcr_mean_of_these, calcium_mean)
+
+gpcr_present <- intersect(gpcr_genes, rownames(log_df))
+length(gpcr_present)
+gpcr_present
+
+###asagidaki baska calisma burada bir geni inhibe ediyorlar
+#BRD4 inhibe etmisler mouse de single cell
+#GSE312831 Embriyonik akciğer epitel hücreleri (E12.5) 
+install.packages("BiocManager")
+BiocManager::install("zellkonverter")
+library(zellkonverter)
+library(zellkonverter)
+
+fp <- "/Users/lemannur/Downloads/GSE312831_adata_epithelial_bulkseq_processed.h5ad"
+
+sce <- readH5AD(fp)
+
+sce
+nrow(sce)
+ncol(sce)
+expr <- assay(sce)
+dim(expr)
+library(SingleCellExperiment)
+expr <- assay(sce)
+dim(expr)
+grep("Add3", rownames(expr), value = TRUE)
+expr["Add3", ]
+#sadece normal lunglari aliyorum mouse
+# WT kolon isimlerini bul
+wt_cols <- grep("WT", colnames(expr), value = TRUE)
+
+wt_cols
+expr_wt <- expr[, wt_cols]
+
+dim(expr_wt)
+#normal akciğer epitel ekspresyon matrisi var (23507 gen × 2 sample). var
+add3_vec <- as.numeric(expr_wt["Add3", ])
+
+cor_vec <- apply(expr_wt, 1, function(x)
+  cor(x, add3_vec, method = "pearson"))
+
+# en yüksek korelasyonlu genler
+sort(cor_vec, decreasing = TRUE)[1:20]
